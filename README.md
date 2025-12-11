@@ -1,1 +1,1 @@
-# sokoban-asp-solver
+# Sokoban Solver using Answer Set Programming
