@@ -1,0 +1,534 @@
+// Main game logic and rendering
+
+class SokobanGame {
+    constructor() {
+        this.currentLevelIndex = 0;
+        this.currentLevel = null;
+        this.player = null;
+        this.boxes = [];
+        this.goals = [];
+        this.grid = [];
+        this.moveCount = 0;
+        this.moveHistory = [];
+        this.isCheckingSolvability = false;
+
+        this.initializeElements();
+        this.setupEventListeners();
+        this.loadLevel(0);
+    }
+
+    initializeElements() {
+        // Game board
+        this.gameBoardEl = document.getElementById('game-board');
+
+        // Info displays
+        this.levelDisplay = document.getElementById('current-level');
+        this.moveCounter = document.getElementById('move-counter');
+        this.boxesOnGoalsDisplay = document.getElementById('boxes-on-goals');
+        this.totalGoalsDisplay = document.getElementById('total-goals');
+
+        // Buttons
+        this.hintBtn = document.getElementById('hint-btn');
+        this.undoBtn = document.getElementById('undo-btn');
+        this.resetBtn = document.getElementById('reset-btn');
+
+        // Modals
+        this.hintModal = document.getElementById('hint-modal');
+        this.hintMessage = document.getElementById('hint-message');
+        this.hintCloseBtn = document.getElementById('hint-close');
+
+        this.victoryModal = document.getElementById('victory-modal');
+        this.finalMovesDisplay = document.getElementById('final-moves');
+        this.nextLevelBtn = document.getElementById('next-level-btn');
+        this.replayBtn = document.getElementById('replay-btn');
+
+        this.alertModal = document.getElementById('alert-modal');
+        this.alertCloseBtn = document.getElementById('alert-close');
+
+        this.loadingOverlay = document.getElementById('loading-overlay');
+
+        // Solvability indicator
+        this.solvabilityIndicator = document.getElementById('solvability-indicator');
+        this.indicatorDot = this.solvabilityIndicator.querySelector('.indicator-dot');
+        this.indicatorText = this.solvabilityIndicator.querySelector('.indicator-text');
+
+        // Level selector
+        this.levelSelectorEl = document.getElementById('level-selector');
+        this.renderLevelSelector();
+
+        // Map Database
+        this.renderMapDatabase();
+    }
+
+    setupEventListeners() {
+        // Keyboard controls
+        document.addEventListener('keydown', (e) => this.handleKeyPress(e));
+
+        // Button clicks
+        this.hintBtn.addEventListener('click', () => this.getHint());
+        this.undoBtn.addEventListener('click', () => this.undoMove());
+        this.resetBtn.addEventListener('click', () => this.resetLevel());
+
+        // Random level button
+        const randomLevelBtn = document.getElementById('random-level-btn');
+        const randomDifficultyDiv = document.getElementById('random-difficulty');
+        const diffBtns = document.querySelectorAll('.btn-diff');
+
+        let selectedDifficulty = 2; // Default: Medium
+
+        // Toggle difficulty selector
+        randomLevelBtn.addEventListener('click', () => {
+            const isHidden = randomDifficultyDiv.style.display === 'none';
+            if (isHidden) {
+                randomDifficultyDiv.style.display = 'block';
+            } else {
+                // Generate random level with selected difficulty
+                this.generateRandomLevel(selectedDifficulty);
+            }
+        });
+
+        // Difficulty selection
+        diffBtns.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                diffBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                selectedDifficulty = parseInt(btn.dataset.diff);
+                // Auto-generate after selecting difficulty
+                this.generateRandomLevel(selectedDifficulty);
+            });
+        });
+
+        // Modal close buttons
+        this.hintCloseBtn.addEventListener('click', () => this.hideModal(this.hintModal));
+        this.nextLevelBtn.addEventListener('click', () => this.nextLevel());
+        this.replayBtn.addEventListener('click', () => this.replayLevel());
+        this.alertCloseBtn.addEventListener('click', () => this.hideModal(this.alertModal));
+    }
+
+    renderLevelSelector() {
+        this.levelSelectorEl.innerHTML = '';
+        PARSED_LEVELS.forEach((level, index) => {
+            const btn = document.createElement('button');
+            btn.className = 'level-btn';
+            btn.textContent = level.id;
+            btn.title = `${level.name} (${level.difficulty})`;
+
+            if (index === this.currentLevelIndex) {
+                btn.classList.add('active');
+            }
+
+            btn.addEventListener('click', () => this.loadLevel(index));
+            this.levelSelectorEl.appendChild(btn);
+        });
+    }
+
+    renderMapDatabase() {
+        const listEl = document.getElementById('map-db-list');
+        if (!listEl) return;
+
+        listEl.innerHTML = '';
+        MAP_DATABASE.forEach(map => {
+            const card = document.createElement('div');
+            card.className = 'map-card';
+            card.style.background = 'rgba(255,255,255,0.05)';
+            card.style.padding = '1rem';
+            card.style.borderRadius = '8px';
+            card.style.border = '1px solid rgba(255,255,255,0.1)';
+
+            card.innerHTML = `
+                <h3 style="margin: 0 0 0.5rem 0; font-size: 1.1rem; color: var(--primary-color);">${map.name}</h3>
+                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem;">${map.source}</p>
+                <div style="display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 1rem;">
+                    <span>Wait, Difficulty: <b>${map.difficulty}</b></span>
+                </div>
+                <div style="font-size: 0.8rem; background: rgba(0,0,0,0.2); padding: 0.5rem; border-radius: 4px; margin-bottom: 1rem;">
+                    <div>🏆 World Record: <span style="color: var(--warning-color);">${map.worldRecord ? map.worldRecord + ' pushes' : 'N/A'}</span></div>
+                    <div>⚡ Best Moves: <span style="color: var(--success-color);">${map.bestSteps || 'Unknown'}</span></div>
+                </div>
+                <button class="btn btn-primary" style="width: 100%; font-size: 0.9rem;">Play Map</button>
+            `;
+
+            // Play button logic
+            const playBtn = card.querySelector('button');
+            playBtn.addEventListener('click', () => {
+                // Parse and load this map
+                // We fake a "level" object structure compatible with our game
+                const parsed = parseLevel({
+                    id: 'DB-' + map.id,
+                    name: map.name,
+                    difficulty: map.difficulty,
+                    grid: map.grid
+                });
+
+                this.loadCustomLevel(parsed);
+                // Scroll up
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            });
+
+            listEl.appendChild(card);
+        });
+    }
+
+    loadCustomLevel(level) {
+        this.currentLevel = level;
+        this.currentLevelIndex = -1; // Specific index for custom
+        this.grid = level.parsedGrid.map(row => [...row]);
+        this.player = { ...level.initialPlayer };
+        this.boxes = level.initialBoxes.map(b => ({ ...b }));
+        this.goals = level.goals.map(g => ({ ...g }));
+        this.moveCount = 0;
+        this.moveHistory = [];
+        this.updateDisplay();
+        this.renderBoard();
+        this.renderLevelSelector();
+        this.checkSolvability();
+    }
+
+    generateRandomLevel(difficulty) {
+        const level = window.generateRandomLevel(difficulty);
+        this.currentLevel = level;
+        this.currentLevelIndex = -1;
+        this.grid = level.parsedGrid.map(row => [...row]);
+        this.player = { ...level.initialPlayer };
+        this.boxes = level.initialBoxes.map(b => ({ ...b }));
+        this.goals = level.goals.map(g => ({ ...g }));
+        this.moveCount = 0;
+        this.moveHistory = [];
+        this.updateDisplay();
+        this.renderBoard();
+        this.renderLevelSelector();
+        this.checkSolvability();
+        document.getElementById('random-difficulty').style.display = 'none';
+    }
+
+    loadLevel(index) {
+        if (index < 0 || index >= PARSED_LEVELS.length) return;
+
+        this.currentLevelIndex = index;
+        this.currentLevel = PARSED_LEVELS[index];
+
+        // Deep copy initial state
+        this.grid = this.currentLevel.parsedGrid.map(row => [...row]);
+        this.player = { ...this.currentLevel.initialPlayer };
+        this.boxes = this.currentLevel.initialBoxes.map(box => ({ ...box }));
+        this.goals = this.currentLevel.goals.map(goal => ({ ...goal }));
+
+        this.moveCount = 0;
+        this.moveHistory = [];
+
+        this.updateDisplay();
+        this.renderBoard();
+        this.renderLevelSelector();
+
+        // Check initial solvability
+        this.checkSolvability();
+    }
+
+    renderBoard() {
+        this.gameBoardEl.innerHTML = '';
+
+        // Set grid dimensions
+        const cols = this.grid[0].length;
+        this.gameBoardEl.style.gridTemplateColumns = `repeat(${cols}, 50px)`;
+
+        // Render cells
+        for (let y = 0; y < this.grid.length; y++) {
+            for (let x = 0; x < this.grid[y].length; x++) {
+                const cell = document.createElement('div');
+                cell.className = 'cell';
+                cell.dataset.x = x;
+                cell.dataset.y = y;
+
+                const cellType = this.grid[y][x];
+                if (cellType === '#') {
+                    cell.classList.add('wall');
+                    cell.textContent = '🧱';
+                } else if (cellType === '.') {
+                    cell.classList.add('goal');
+                } else {
+                    cell.classList.add('floor');
+                }
+
+                // Add player
+                if (this.player.x === x && this.player.y === y) {
+                    const playerEl = document.createElement('div');
+                    playerEl.className = 'player';
+                    playerEl.textContent = '🧍';
+                    cell.appendChild(playerEl);
+                }
+
+                // Add box
+                const box = this.boxes.find(b => b.x === x && b.y === y);
+                if (box) {
+                    const boxEl = document.createElement('div');
+                    boxEl.className = 'box';
+
+                    const isOnGoal = this.goals.some(g => g.x === x && g.y === y);
+                    if (isOnGoal) {
+                        boxEl.classList.add('on-goal');
+                        boxEl.textContent = '✅';
+                    } else {
+                        boxEl.textContent = '📦';
+                    }
+
+                    cell.appendChild(boxEl);
+                }
+
+                this.gameBoardEl.appendChild(cell);
+            }
+        }
+    }
+
+    handleKeyPress(e) {
+        const keyMap = {
+            'ArrowUp': 'up',
+            'ArrowDown': 'down',
+            'ArrowLeft': 'left',
+            'ArrowRight': 'right',
+            'w': 'up',
+            'a': 'left',
+            's': 'down',
+            'd': 'right'
+        };
+
+        const direction = keyMap[e.key.toLowerCase()] || keyMap[e.key];
+        if (direction) {
+            e.preventDefault();
+            this.move(direction);
+        }
+    }
+
+    move(direction) {
+        const delta = {
+            'up': { x: 0, y: -1 },
+            'down': { x: 0, y: 1 },
+            'left': { x: -1, y: 0 },
+            'right': { x: 1, y: 0 }
+        };
+
+        const d = delta[direction];
+        if (!d) return;
+
+        const newX = this.player.x + d.x;
+        const newY = this.player.y + d.y;
+
+        // Check bounds
+        if (newY < 0 || newY >= this.grid.length || newX < 0 || newX >= this.grid[0].length) {
+            return;
+        }
+
+        // Check wall
+        if (this.grid[newY][newX] === '#') {
+            return;
+        }
+
+        // Check box
+        const boxIndex = this.boxes.findIndex(b => b.x === newX && b.y === newY);
+        if (boxIndex !== -1) {
+            // Try to push box
+            const boxNewX = newX + d.x;
+            const boxNewY = newY + d.y;
+
+            // Check if box can be pushed
+            if (boxNewY < 0 || boxNewY >= this.grid.length ||
+                boxNewX < 0 || boxNewX >= this.grid[0].length ||
+                this.grid[boxNewY][boxNewX] === '#' ||
+                this.boxes.some(b => b.x === boxNewX && b.y === boxNewY)) {
+                return;
+            }
+
+            // Save state for undo
+            this.saveState();
+
+            // Push box
+            this.boxes[boxIndex].x = boxNewX;
+            this.boxes[boxIndex].y = boxNewY;
+
+            // Move player
+            this.player.x = newX;
+            this.player.y = newY;
+
+            this.moveCount++;
+        } else {
+            // Save state for undo
+            this.saveState();
+
+            // Move player
+            this.player.x = newX;
+            this.player.y = newY;
+
+            this.moveCount++;
+        }
+
+        this.updateDisplay();
+        this.renderBoard();
+
+        // Check win condition
+        if (this.checkWin()) {
+            setTimeout(() => this.showVictory(), 500);
+        } else {
+            // Check solvability after each move
+            this.checkSolvability();
+        }
+    }
+
+    saveState() {
+        this.moveHistory.push({
+            player: { ...this.player },
+            boxes: this.boxes.map(box => ({ ...box })),
+            moveCount: this.moveCount
+        });
+    }
+
+    undoMove() {
+        if (this.moveHistory.length === 0) return;
+
+        const state = this.moveHistory.pop();
+        this.player = state.player;
+        this.boxes = state.boxes;
+        this.moveCount = state.moveCount;
+
+        this.updateDisplay();
+        this.renderBoard();
+        this.checkSolvability();
+    }
+
+    resetLevel() {
+        if (this.currentLevelIndex === -1 && this.currentLevel) {
+            this.loadCustomLevel(this.currentLevel);
+        } else {
+            this.loadLevel(this.currentLevelIndex);
+        }
+    }
+
+    checkWin() {
+        return this.boxes.every(box =>
+            this.goals.some(goal => goal.x === box.x && goal.y === box.y)
+        );
+    }
+
+    async checkSolvability() {
+        if (this.isCheckingSolvability) return;
+
+        this.isCheckingSolvability = true;
+        this.indicatorText.textContent = 'Checking...';
+        this.indicatorDot.className = 'indicator-dot';
+
+        const gameState = {
+            grid: this.grid,
+            player: this.player,
+            boxes: this.boxes,
+            goals: this.goals
+        };
+
+        const result = await SokobanAPI.checkSolvable(gameState);
+
+        if (result.solvable === true) {
+            this.indicatorText.textContent = 'Solvable ✓';
+            this.indicatorDot.classList.add('solvable');
+        } else if (result.solvable === false) {
+            this.indicatorText.textContent = 'Unsolvable!';
+            this.indicatorDot.classList.add('unsolvable');
+
+            // Show alert after a delay
+            setTimeout(() => {
+                this.showModal(this.alertModal);
+            }, 1000);
+        } else {
+            this.indicatorText.textContent = 'Error checking';
+            this.indicatorDot.className = 'indicator-dot';
+        }
+
+        this.isCheckingSolvability = false;
+    }
+
+    async getHint() {
+        this.showLoading();
+
+        const gameState = {
+            grid: this.grid,
+            player: this.player,
+            boxes: this.boxes,
+            goals: this.goals
+        };
+
+        const result = await SokobanAPI.getHint(gameState);
+
+        this.hideLoading();
+
+        if (result.hint) {
+            this.hintMessage.textContent = result.message;
+            this.showModal(this.hintModal);
+
+            // Highlight the suggested direction
+            const directionEmoji = {
+                'up': '⬆️',
+                'down': '⬇️',
+                'left': '⬅️',
+                'right': '➡️'
+            };
+
+            this.hintMessage.textContent = `${directionEmoji[result.hint] || ''} ${result.message}`;
+        } else {
+            this.hintMessage.textContent = result.message || 'No hint available. Try a different approach!';
+            this.showModal(this.hintModal);
+        }
+    }
+
+    updateDisplay() {
+        this.levelDisplay.textContent = this.currentLevel.id;
+        this.moveCounter.textContent = this.moveCount;
+
+        const boxesOnGoals = this.boxes.filter(box =>
+            this.goals.some(goal => goal.x === box.x && goal.y === box.y)
+        ).length;
+
+        this.boxesOnGoalsDisplay.textContent = boxesOnGoals;
+        this.totalGoalsDisplay.textContent = this.goals.length;
+
+        // Update undo button state
+        this.undoBtn.disabled = this.moveHistory.length === 0;
+    }
+
+    showVictory() {
+        this.finalMovesDisplay.textContent = this.moveCount;
+        this.showModal(this.victoryModal);
+    }
+
+    nextLevel() {
+        this.hideModal(this.victoryModal);
+
+        if (this.currentLevelIndex < PARSED_LEVELS.length - 1) {
+            this.loadLevel(this.currentLevelIndex + 1);
+        } else {
+            // Restart from first level
+            this.loadLevel(0);
+        }
+    }
+
+    replayLevel() {
+        this.hideModal(this.victoryModal);
+        this.resetLevel();
+    }
+
+    showModal(modal) {
+        modal.classList.add('show');
+    }
+
+    hideModal(modal) {
+        modal.classList.remove('show');
+    }
+
+    showLoading() {
+        this.loadingOverlay.classList.add('show');
+    }
+
+    hideLoading() {
+        this.loadingOverlay.classList.remove('show');
+    }
+}
+
+// Initialize game when DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+    window.game = new SokobanGame();
+});

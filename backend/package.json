@@ -1,0 +1,24 @@
+{
+    "name": "sokoban-asp-backend",
+    "version": "1.0.0",
+    "description": "Backend server for Sokoban puzzle game with ASP-based hint system",
+    "main": "server.js",
+    "scripts": {
+        "start": "node server.js",
+        "dev": "node server.js"
+    },
+    "keywords": [
+        "sokoban",
+        "asp",
+        "clingo",
+        "puzzle",
+        "game"
+    ],
+    "author": "",
+    "license": "MIT",
+    "dependencies": {
+        "express": "^4.18.2",
+        "cors": "^2.8.5",
+        "body-parser": "^1.20.2"
+    }
+}
