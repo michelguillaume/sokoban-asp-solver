@@ -11,7 +11,7 @@ from typing import List, Optional, Tuple
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-RAW_TS_PATH = PROJECT_ROOT / "new-frontend" / "my-app" / "app" / "data" / "officialLevelsRaw.ts"
+RAW_TS_PATH = PROJECT_ROOT / "frontend" / "my-app" / "app" / "data" / "officialLevelsRaw.ts"
 
 
 @dataclass(frozen=True)
