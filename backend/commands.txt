@@ -1,0 +1,6 @@
+docker build -t fastapi-app .
+docker run -d --name fastapi-app --restart unless-stopped -p 8000:80 fastapi-app
+
+docker ps
+
+docker logs -f fastapi-app
