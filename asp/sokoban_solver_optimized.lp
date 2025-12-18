@@ -1,98 +1,85 @@
 % Sokoban Solver - Optimized
-% Uses heuristics, symmetry breaking, and deadlock detection
 
-% ============================================================================
-% CONFIGURATION
-% ============================================================================
 #const max_steps = 50.
 
-% Directions
 direction(0, -1; 0, 1; -1, 0; 1, 0).
 dir_name(0, -1, up).
 dir_name(0, 1, down).
 dir_name(-1, 0, left).
 dir_name(1, 0, right).
 
-% ============================================================================
-% STATIC ANALYSIS (DEADLOCK DETECTION)
-% ============================================================================
-% Define map bounds
-maxx(MX) :- MX = #max { X : cell(X,_,_) }.
-maxy(MY) :- MY = #max { Y : cell(_,Y,_) }.
+% Safe dead squares (no false positives).
 
-% Identify non-goal floor
-nongoal(X,Y) :- cell(X,Y,floor).
-nongoal(X,Y) :- cell(X,Y,wall). 
-% (Note: cell/3 normally is wall, floor, goal. 'goal' implies it's a valid target)
-
-% Simple Corner Deadlock:
-% A floor/ nongoal is a simple dead square if it has walls on two adjacent sides
-is_wall(X,Y) :- cell(X,Y,wall).
-
-dead(X,Y) :- cell(X,Y,floor), 
-             is_wall(X-1,Y), is_wall(X,Y-1).
-dead(X,Y) :- cell(X,Y,floor), 
-             is_wall(X+1,Y), is_wall(X,Y-1).
-dead(X,Y) :- cell(X,Y,floor), 
-             is_wall(X-1,Y), is_wall(X,Y+1).
-dead(X,Y) :- cell(X,Y,floor), 
-             is_wall(X+1,Y), is_wall(X,Y+1).
-
-% Propagate dead zones (Simplified: Dead end corridors)
-% If a cell has 3 blocked sides (walls or dead cells), it is dead
-% (This is a simplified recursive deadlock check)
-dead(X,Y) :- cell(X,Y,floor),
-             3 { is_wall(NX,NY) : direction(DX,DY), NX=X+DX, NY=Y+DY;
-                 dead(NX,NY)    : direction(DX,DY), NX=X+DX, NY=Y+DY } 4.
-
-% ============================================================================
-% STATE GENERATION
-% ============================================================================
-% Time steps
 time(0..max_steps).
 
-% Initial state
-at(X, Y, 0) :- initial_player(X, Y).
-box(X, Y, 0) :- initial_box(X, Y).
+walkable(X,Y) :- cell(X,Y,floor).
+walkable(X,Y) :- cell(X,Y,goal).
 
-% Action generation
+goal(X,Y) :- cell(X,Y,goal).
+
+safe_box(X,Y) :- goal(X,Y).
+safe_box(PX,PY) :-
+    safe_box(X,Y),
+    direction(DX,DY),
+    PX = X-DX, PY = Y-DY,
+    walkable(PX,PY),
+    walkable(PX-DX, PY-DY).
+
+dead(X,Y) :- cell(X,Y,floor), not safe_box(X,Y).
+
+at(X, Y, 0) :- initial_player(X, Y), walkable(X,Y).
+box(X, Y, 0) :- initial_box(X, Y), walkable(X,Y).
+
 { move(DX, DY, T) : direction(DX, DY) } 1 :- time(T), T > 0.
 
-% Position Updates
-% Helper: Target position for player
-next_pos(X+DX, Y+DY, T) :- at(X, Y, T-1), move(DX, DY, T).
+moved(T) :- move(_, _, T).
 
-% Constraint: Cannot move into wall
-:- next_pos(X, Y, T), is_wall(X, Y).
+next_pos(NX, NY, T) :-
+    at(X, Y, T-1),
+    move(DX, DY, T),
+    NX = X+DX, NY = Y+DY,
+    walkable(NX, NY).
+
+has_next(T) :- next_pos(_, _, T).
+:- moved(T), not has_next(T).
 
 % Box Interaction
 % Define when a push happens
-push(X, Y, DX, DY, T) :- 
-    at(X, Y, T-1), 
-    move(DX, DY, T), 
-    box(X+DX, Y+DY, T-1).
+push(X, Y, DX, DY, T) :-
+    at(X, Y, T-1),
+    move(DX, DY, T),
+    BX = X+DX, BY = Y+DY,
+    box(BX, BY, T-1),
+    NX = X+2*DX, NY = Y+2*DY,
+    walkable(NX, NY),
+    not box(NX, NY, T-1),
+    not dead(NX, NY).
 
-% Constraint: Cannot push if interaction is invalid (box blocked or into wall/dead)
-:- push(X, Y, DX, DY, T),
-   is_wall(X+2*DX, Y+2*DY).
-:- push(X, Y, DX, DY, T),
-   box(X+2*DX, Y+2*DY, T-1).
-:- push(X, Y, DX, DY, T),   % Optimization: Don't push into dead square
-   dead(X+2*DX, Y+2*DY).
+% If the next position is occupied by a box, the move must be a valid push
+:- move(DX, DY, T),
+   at(X, Y, T-1),
+   BX = X+DX, BY = Y+DY,
+   box(BX, BY, T-1),
+   not push(X, Y, DX, DY, T).
 
 % Effect: Box moves
-box(X+2*DX, Y+2*DY, T) :- push(X, Y, DX, DY, T).
+box(NX, NY, T) :-
+    push(X, Y, DX, DY, T),
+    NX = X+2*DX, NY = Y+2*DY.
 
 % Effect: Box stays (Inertia)
-box(X, Y, T) :- box(X, Y, T-1), not box_moved(X, Y, T), time(T), T > 0.
-box_moved(X, Y, T) :- push(PX, PY, DX, DY, T), X = PX+DX, Y = PY+DY.
+box(X, Y, T) :-
+    box(X, Y, T-1),
+    not box_moved(X, Y, T),
+    time(T), T > 0.
+box_moved(BX, BY, T) :-
+    push(PX, PY, DX, DY, T),
+    BX = PX+DX, BY = PY+DY.
 
 % Effect: Player moves
 at(X, Y, T) :- next_pos(X, Y, T).
 
-% Constraint: Player cannot move into box if not pushing (handled by push check?)
-% If next_pos is a box, it MUST be a valid push.
-:- next_pos(X, Y, T), box(X, Y, T-1), not push(X-DX, Y-DY, DX, DY, T) : move(DX,DY,T).
+% (Removed: older conditional-literal constraint; replaced by the push validity constraint above)
 
 % ============================================================================
 % HEURISTICS (GOAL DISTANCE)
@@ -130,22 +117,20 @@ inverse(DX, DY, -DX, -DY) :- direction(DX, DY).
 % ============================================================================
 % MINIMIZATION / SEARCH GUIDANCE
 % ============================================================================
-% Heuristic: Minimize sum of distances of boxes to goals at every step
-% This acts like a potential field pulling boxes to goals.
-#minimize { D,X,Y,T : box(X,Y,T), gdist(X,Y,D) }.
+% Heuristic: Minimize total moves (Highest Priority - Shortest Path)
+#minimize { 1@2, T : move(_,_,T) }.
 
-% Also minimize total moves (lower priority)
-#minimize { 1,T : move(_,_,T) }.
+% Secondary: Minimize sum of distances of boxes to goals (Guide search)
+#minimize { D@1, X,Y,T : box(X,Y,T), gdist(X,Y,D) }.
 
-goal(X,Y) :- cell(X,Y,goal).
-finished(T) :- time(T), 
-               count_goals(N), 
-               N { box(X,Y,T) : goal(X,Y) } N.
-count_goals(N) :- N = #count { X,Y : goal(X,Y) }.
+% Finished when ALL boxes are on goals (goals can be >= boxes)
+box_off_goal(T) :- time(T), box(X,Y,T), not goal(X,Y).
+finished(T) :- time(T), not box_off_goal(T).
 
 :- not finished(max_steps). 
 
 % Output formatting
 move(DName, T) :- move(DX, DY, T), dir_name(DX, DY, DName).
 #show move/2.
+#show push/5.
 
