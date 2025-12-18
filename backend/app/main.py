@@ -22,6 +22,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def log_exceptions_middleware(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as e:
+        import traceback
+        print(f"ERROR: {e}")
+        traceback.print_exc()
+        raise e from None
+
 # Models
 class Point(BaseModel):
     x: int
